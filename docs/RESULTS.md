@@ -1,4 +1,4 @@
-# Sample Results
+# CaptchaOCR Sample Results
 
 These results come from the current adaptive pipeline and character-level
 reranker. They are not hardcoded labels.

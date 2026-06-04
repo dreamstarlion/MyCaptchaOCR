@@ -1,5 +1,5 @@
 [project]
-name = "cn-captcha-ocr"
+name = "CaptchaOCR"
 version = "0.1.0"
 description = "OpenCV and ddddocr pipeline for noisy Chinese captcha images"
 readme = "README.md"

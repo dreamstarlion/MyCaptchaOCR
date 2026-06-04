@@ -1,4 +1,4 @@
-# Approach
+# CaptchaOCR Approach
 
 The project treats OCR as the last step. The important work is to preserve
 Chinese glyph topology while reducing background noise, dots, and line

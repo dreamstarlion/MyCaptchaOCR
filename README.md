@@ -1,4 +1,4 @@
-# cn-captcha-ocr
+# CaptchaOCR
 
 OpenCV + ddddocr pipeline for noisy Chinese captcha images.
 
