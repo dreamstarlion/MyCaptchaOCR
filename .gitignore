@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+.venv-*/
+.ocr-cache/
+__pycache__/
+*.py[cod]
+
+# Generated outputs
+data/processed/
+reports/
+
+# Local scratch files
+*.log
