@@ -6,7 +6,7 @@ interference.
 
 ## Pipeline
 
-1. Crop the captcha body from the screenshot using brightness projection.
+1. Crop the captcha body from the source image using brightness projection.
 2. Upscale the cropped captcha before destructive operations.
 3. Generate multiple preprocessing families:
    - original ROI at 1x to 5x
@@ -16,7 +16,9 @@ interference.
    - horizontal dark-line inpaint
    - adaptive dominant-color extraction
    - small right/bottom crops
-4. Run ddddocr default, beta, and old recognizers on all candidates.
+4. Run ddddocr default, beta, and old recognizers. The default adaptive profile
+   starts with 50 no-crop variants and only expands to the full 650-variant set
+   when the early OCR consensus is low confidence.
 5. Normalize OCR text to Chinese characters.
 6. Rerank by:
    - expected length
@@ -34,6 +36,12 @@ same engine are capped more aggressively than cross-engine agreement.
 For ambiguous samples, the pipeline should expose top-N candidates instead of
 blindly trusting top-1. This is especially important when the last character is
 changed by a trailing line, such as `九` being misread as `力`.
+
+## Sample Naming
+
+Tracked sample files use ASCII names under `data/raw/`. Chinese captcha samples
+use `sample-<six-digit-key>.png`, which lets the scripts derive a stable sample
+key without depending on localized screenshot filenames.
 
 ## Why PaddleOCR Was Removed
 

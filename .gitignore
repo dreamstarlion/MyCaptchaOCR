@@ -1,9 +1,14 @@
 .DS_Store
-.venv/
-.venv-*/
+.venv*/
 .ocr-cache/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
 
 # Generated outputs
 data/processed/

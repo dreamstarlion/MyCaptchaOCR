@@ -1,14 +1,37 @@
 [project]
 name = "MyCaptchaOCR"
-version = "0.1.0"
+version = "1.0.0"
 description = "OpenCV and ddddocr pipeline for noisy Chinese captcha images"
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11,<3.15"
+authors = [
+  { name = "MyCaptchaOCR contributors" },
+]
+keywords = ["captcha", "ocr", "opencv", "ddddocr", "chinese-ocr"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Multimedia :: Graphics :: Capture :: Digital Camera",
+  "Topic :: Scientific/Engineering :: Image Recognition",
+]
 dependencies = [
   "ddddocr==1.6.1",
+  "onnxruntime==1.26.0",
   "opencv-python==4.13.0.92",
-  "opencv-contrib-python==4.13.0.92",
   "pillow==12.2.0",
-  "pandas==2.3.3",
-  "numpy==2.2.6",
+  "numpy==2.4.6",
 ]
+
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = []

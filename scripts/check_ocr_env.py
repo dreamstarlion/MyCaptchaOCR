@@ -15,14 +15,14 @@ def main() -> None:
     import cv2
     import ddddocr
     import numpy
-    import pandas
+    import onnxruntime
     import PIL
 
     print(f"python={sys.version.split()[0]}")
     print(f"ddddocr={version('ddddocr')}")
+    print(f"onnxruntime={onnxruntime.__version__}")
     print(f"opencv={cv2.__version__}")
     print(f"numpy={numpy.__version__}")
-    print(f"pandas={pandas.__version__}")
     print(f"pillow={PIL.__version__}")
     for name, path in paths.items():
         print(f"{name}={path}")

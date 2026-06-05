@@ -11,11 +11,10 @@ from __future__ import annotations
 import argparse
 import csv
 import itertools
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
 from ocr_project_env import PROJECT_ROOT
@@ -38,10 +37,10 @@ class ComboScore:
     position_options: str
 
 
-def row_weight(row: pd.Series) -> float:
-    family = str(row["family"])
-    variant = str(row["variant"])
-    engine = str(row["engine"])
+def row_weight(row: dict[str, str]) -> float:
+    family = row.get("family", "")
+    variant = row.get("variant", "")
+    engine = row.get("engine", "")
     weight = 1.0
     if engine == "ddddocr_beta":
         weight += 0.35
@@ -69,26 +68,34 @@ def write_csv(rows: list[ComboScore], path: Path) -> None:
             writer.writerow(row.__dict__)
 
 
-def score_combinations(df: pd.DataFrame, expected_len: int) -> list[ComboScore]:
+def read_rows(path: Path) -> list[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8") as f:
+        return [{key: value or "" for key, value in row.items()} for row in csv.DictReader(f)]
+
+
+def score_combinations(input_rows: list[dict[str, str]], expected_len: int) -> list[ComboScore]:
     results: list[ComboScore] = []
-    df = df.fillna("")
-    for key, group in df.groupby("image_key"):
-        exact = group[group["text"].astype(str).str.len() == expected_len].copy()
-        if exact.empty:
+    by_key: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in input_rows:
+        by_key[row.get("image_key", "")].append(row)
+
+    for key, group in by_key.items():
+        exact = [row for row in group if len(row.get("text", "")) == expected_len]
+        if not exact:
             continue
 
         pos_support = [defaultdict(lambda: {"weight": 0.0, "engines": set(), "families": set(), "variants": set()}) for _ in range(expected_len)]
-        direct_rows: dict[str, list[pd.Series]] = defaultdict(list)
-        for _idx, row in exact.iterrows():
-            text = str(row["text"])
+        direct_rows: dict[str, list[dict[str, str]]] = defaultdict(list)
+        for row in exact:
+            text = row.get("text", "")
             weight = row_weight(row)
             direct_rows[text].append(row)
             for idx, char in enumerate(text):
                 item = pos_support[idx][char]
                 item["weight"] += weight
-                item["engines"].add(row["engine"])
-                item["families"].add(row["family"])
-                item["variants"].add(row["variant"])
+                item["engines"].add(row.get("engine", ""))
+                item["families"].add(row.get("family", ""))
+                item["variants"].add(row.get("variant", ""))
 
         position_options = []
         option_labels = []
@@ -116,9 +123,9 @@ def score_combinations(df: pd.DataFrame, expected_len: int) -> list[ComboScore]:
             direct_path = ""
             direct_engines = direct_families = direct_variants = 0
             if direct:
-                engines = {row["engine"] for row in direct}
-                families = {row["family"] for row in direct}
-                variants = {row["variant"] for row in direct}
+                engines = {row.get("engine", "") for row in direct}
+                families = {row.get("family", "") for row in direct}
+                variants = {row.get("variant", "") for row in direct}
                 direct_engines = len(engines)
                 direct_families = len(families)
                 direct_variants = len(variants)
@@ -133,14 +140,14 @@ def score_combinations(df: pd.DataFrame, expected_len: int) -> list[ComboScore]:
                     + min(direct_variants, variant_cap) * 0.35
                 )
                 if any(
-                    ("dominant_color" in str(row["family"]) or "dark_suppress" in str(row["family"]))
-                    and "_crop_" in str(row["variant"])
+                    ("dominant_color" in row.get("family", "") or "dark_suppress" in row.get("family", ""))
+                    and "_crop_" in row.get("variant", "")
                     for row in direct
                 ):
                     direct_score += 8.0
                 first = direct[0]
-                direct_example = f"{first['engine']}:{first['variant']}"
-                direct_path = str(first["path"])
+                direct_example = f"{first.get('engine', '')}:{first.get('variant', '')}"
+                direct_path = first.get("path", "")
             score = positional + direct_score - (0.0 if direct else 5.0)
             results.append(
                 ComboScore(
@@ -229,8 +236,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    df = pd.read_csv(args.rows)
-    rows = score_combinations(df, args.expected_len)
+    rows = score_combinations(read_rows(args.rows), args.expected_len)
     write_csv(rows, REPORTS_DIR / "adaptive_ocr_v2_combinations.csv")
     write_markdown(rows, REPORTS_DIR / "adaptive_ocr_v2_summary.md", args.top_n)
     build_sheet(rows, REPORTS_DIR / "adaptive_ocr_v2_top_sheet.png", args.top_n)

@@ -13,6 +13,7 @@ import csv
 import io
 import math
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +65,18 @@ class TextScore:
     length_penalty: float
     non_chinese_penalty: float
     best_examples: str
+
+
+@dataclass
+class ImageRun:
+    candidates: list[Candidate]
+    rows: list[OCRRow]
+    mode: str
+    top_text: str
+    top_score: float | None
+    preprocess_s: float
+    ocr_s: float
+    total_s: float
 
 
 def encode_png(bgr: np.ndarray) -> bytes:
@@ -214,7 +227,7 @@ def inpaint_dark_horizontal(bgr: np.ndarray) -> np.ndarray:
     return cv2.inpaint(bgr, mask, 3, cv2.INPAINT_TELEA)
 
 
-def build_variants(raw: np.ndarray) -> list[tuple[str, str, np.ndarray]]:
+def build_variants(raw: np.ndarray, include_crops: bool = True) -> list[tuple[str, str, np.ndarray]]:
     variants: list[tuple[str, str, np.ndarray]] = []
     for scale in [1, 2, 3, 4, 5]:
         roi = crop_and_upscale(raw, scale)
@@ -232,7 +245,7 @@ def build_variants(raw: np.ndarray) -> list[tuple[str, str, np.ndarray]]:
         ]
         variants.extend(base)
         for family, name, image in base:
-            if family in {"roi", "dark_suppress", "dark_suppress_strong", "dominant_color", "dominant_color_mid", "dominant_color_loose", "dominant_color_strict", "hline"}:
+            if include_crops and family in {"roi", "dark_suppress", "dark_suppress_strong", "dominant_color", "dominant_color_mid", "dominant_color_loose", "dominant_color_strict", "hline"}:
                 for right in [0, 6, 12, 20]:
                     for bottom in [0, 4, 8, 12]:
                         if right == 0 and bottom == 0:
@@ -241,14 +254,14 @@ def build_variants(raw: np.ndarray) -> list[tuple[str, str, np.ndarray]]:
     return variants
 
 
-def save_candidates(path: Path) -> list[Candidate]:
+def save_candidates(path: Path, include_crops: bool = True) -> list[Candidate]:
     key = image_key(path)
     out_dir = OUT_DIR / key
     out_dir.mkdir(parents=True, exist_ok=True)
     raw = read_bgr(path)
     candidates = []
     seen = set()
-    for family, variant, image in build_variants(raw):
+    for family, variant, image in build_variants(raw, include_crops=include_crops):
         if variant in seen:
             continue
         seen.add(variant)
@@ -258,12 +271,15 @@ def save_candidates(path: Path) -> list[Candidate]:
     return candidates
 
 
-def run_ocr(candidates: list[Candidate]) -> list[OCRRow]:
-    engines = {
+def create_ocr_engines() -> dict[str, ddddocr.DdddOcr]:
+    return {
         "ddddocr_default": ddddocr.DdddOcr(show_ad=False),
         "ddddocr_beta": ddddocr.DdddOcr(show_ad=False, beta=True),
         "ddddocr_old": ddddocr.DdddOcr(show_ad=False, old=True),
     }
+
+
+def run_ocr_with_engines(candidates: list[Candidate], engines: dict[str, ddddocr.DdddOcr]) -> list[OCRRow]:
     rows = []
     for candidate in candidates:
         data = candidate.path.read_bytes()
@@ -281,6 +297,10 @@ def run_ocr(candidates: list[Candidate]) -> list[OCRRow]:
                 )
             )
     return rows
+
+
+def run_ocr(candidates: list[Candidate]) -> list[OCRRow]:
+    return run_ocr_with_engines(candidates, create_ocr_engines())
 
 
 def score_texts(rows: list[OCRRow], expected_len: int) -> list[TextScore]:
@@ -326,6 +346,73 @@ def score_texts(rows: list[OCRRow], expected_len: int) -> list[TextScore]:
             )
         )
     return sorted(scores, key=lambda item: (item.image_key, -item.score, item.text))
+
+
+def is_confident(scores: list[TextScore], expected_len: int, min_margin: float, min_engines: int, min_families: int) -> bool:
+    if not scores:
+        return False
+    top = scores[0]
+    if len(top.text) != expected_len:
+        return False
+    if top.engine_count < min_engines or top.family_count < min_families:
+        return False
+    second_score = scores[1].score if len(scores) > 1 else float("-inf")
+    return top.score - second_score >= min_margin
+
+
+def run_image(
+    path: Path,
+    engines: dict[str, ddddocr.DdddOcr],
+    profile: str,
+    expected_len: int,
+    confidence_margin: float,
+    confidence_min_engines: int,
+    confidence_min_families: int,
+) -> ImageRun:
+    start = time.perf_counter()
+    preprocess_s = 0.0
+    ocr_s = 0.0
+
+    if profile == "full":
+        preprocess_start = time.perf_counter()
+        candidates = save_candidates(path, include_crops=True)
+        preprocess_s += time.perf_counter() - preprocess_start
+
+        ocr_start = time.perf_counter()
+        rows = run_ocr_with_engines(candidates, engines)
+        ocr_s += time.perf_counter() - ocr_start
+        scores = score_texts(rows, expected_len)
+        top = scores[0] if scores else None
+        return ImageRun(candidates, rows, "full", top.text if top else "", top.score if top else None, preprocess_s, ocr_s, time.perf_counter() - start)
+
+    preprocess_start = time.perf_counter()
+    fast_candidates = save_candidates(path, include_crops=False)
+    preprocess_s += time.perf_counter() - preprocess_start
+
+    ocr_start = time.perf_counter()
+    fast_rows = run_ocr_with_engines(fast_candidates, engines)
+    ocr_s += time.perf_counter() - ocr_start
+    fast_scores = score_texts(fast_rows, expected_len)
+
+    if profile == "fast" or is_confident(fast_scores, expected_len, confidence_margin, confidence_min_engines, confidence_min_families):
+        top = fast_scores[0] if fast_scores else None
+        mode = "fast" if profile == "fast" else "adaptive-fast"
+        return ImageRun(fast_candidates, fast_rows, mode, top.text if top else "", top.score if top else None, preprocess_s, ocr_s, time.perf_counter() - start)
+
+    preprocess_start = time.perf_counter()
+    full_candidates = save_candidates(path, include_crops=True)
+    preprocess_s += time.perf_counter() - preprocess_start
+    seen_variants = {candidate.variant for candidate in fast_candidates}
+    extra_candidates = [candidate for candidate in full_candidates if candidate.variant not in seen_variants]
+
+    ocr_start = time.perf_counter()
+    extra_rows = run_ocr_with_engines(extra_candidates, engines)
+    ocr_s += time.perf_counter() - ocr_start
+
+    rows = fast_rows + extra_rows
+    scores = score_texts(rows, expected_len)
+    top = scores[0] if scores else None
+    return ImageRun(full_candidates, rows, "adaptive-full", top.text if top else "", top.score if top else None, preprocess_s, ocr_s, time.perf_counter() - start)
 
 
 def write_csv(rows: list[object], path: Path) -> None:
@@ -406,8 +493,12 @@ def write_markdown(scores: list[TextScore], output: Path) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-dir", type=Path, default=RAW_DIR)
-    parser.add_argument("--pattern", default="屏幕截图*.png")
+    parser.add_argument("--pattern", default="sample-[0-9]*.png")
     parser.add_argument("--expected-len", type=int, default=4)
+    parser.add_argument("--profile", choices=["adaptive", "fast", "full"], default="adaptive")
+    parser.add_argument("--confidence-margin", type=float, default=5.0)
+    parser.add_argument("--confidence-min-engines", type=int, default=2)
+    parser.add_argument("--confidence-min-families", type=int, default=2)
     return parser.parse_args()
 
 
@@ -417,10 +508,31 @@ def main() -> None:
     if not paths:
         raise SystemExit(f"no images matched {args.input_dir / args.pattern}")
 
+    engine_start = time.perf_counter()
+    engines = create_ocr_engines()
+    engine_init_s = time.perf_counter() - engine_start
+
     candidates = []
+    rows = []
+    runs = []
     for path in paths:
-        candidates.extend(save_candidates(path))
-    rows = run_ocr(candidates)
+        run = run_image(
+            path,
+            engines,
+            args.profile,
+            args.expected_len,
+            args.confidence_margin,
+            args.confidence_min_engines,
+            args.confidence_min_families,
+        )
+        runs.append(run)
+        candidates.extend(run.candidates)
+        rows.extend(run.rows)
+        top = f" top={run.top_text!r} score={run.top_score}" if run.top_text else ""
+        print(
+            f"{image_key(path)} mode={run.mode} candidates={len(run.candidates)} ocr_rows={len(run.rows)}"
+            f"{top} preprocess_s={run.preprocess_s:.3f} ocr_s={run.ocr_s:.3f} total_s={run.total_s:.3f}"
+        )
     scores = score_texts(rows, args.expected_len)
 
     write_csv(rows, REPORTS_DIR / "adaptive_ocr_rows.csv")
@@ -428,8 +540,12 @@ def main() -> None:
     write_markdown(scores, REPORTS_DIR / "adaptive_ocr_summary.md")
     build_top_sheet(scores, rows, REPORTS_DIR / "adaptive_ocr_top_sheet.png")
     print(f"images: {len(paths)}")
+    print(f"profile: {args.profile}")
+    print(f"engine_init_s: {engine_init_s:.3f}")
     print(f"candidates: {len(candidates)}")
     print(f"ocr rows: {len(rows)}")
+    print(f"avg_total_s_per_image: {sum(run.total_s for run in runs) / len(runs):.3f}")
+    print(f"avg_ocr_s_per_image: {sum(run.ocr_s for run in runs) / len(runs):.3f}")
     print(f"wrote {REPORTS_DIR / 'adaptive_ocr_summary.md'}")
 
 
