@@ -631,13 +631,15 @@ def is_confident(scores: list[TextScore], expected_len: int, min_margin: float, 
         return False
     second_score = scores[1].score if len(scores) > 1 else float("-inf")
     margin = top.score - second_score
+    if margin < min_margin:
+        return False
     if top.engine_count >= min_engines and top.family_count >= min_families and margin >= min_margin:
         return True
-    if top.score >= 32.0 and top.engine_count >= 3 and top.family_count >= 6 and top.total_hits >= 35 and margin >= 2.0:
+    if top.score >= 32.0 and top.engine_count >= 3 and top.family_count >= 6 and top.total_hits >= 35:
         return True
-    if top.score >= 30.0 and top.engine_count >= 3 and top.family_count >= 5 and margin >= 3.0:
+    if top.score >= 30.0 and top.engine_count >= 3 and top.family_count >= 5:
         return True
-    if top.score >= 29.5 and top.family_count >= 8 and top.total_hits >= 30 and margin >= 3.0:
+    if top.score >= 29.5 and top.family_count >= 8 and top.total_hits >= 30:
         return True
     return False
 
@@ -791,7 +793,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--adaptive-full-limit",
         type=int,
-        default=520,
+        default=455,
         help="Maximum candidates used by adaptive fallback. Use 0 for unrestricted full fallback.",
     )
     return parser.parse_args()

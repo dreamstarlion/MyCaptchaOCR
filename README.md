@@ -81,15 +81,17 @@ Use a different input directory:
 
 ### Profiles
 
-- `--profile adaptive` is the default. It first runs 50 no-crop candidates per
-  image, then runs the full 650-candidate set only when the early result is low
-  confidence.
-- `--profile fast` always uses the 50-candidate set.
-- `--profile full` always uses the 650-candidate set.
+- `--profile adaptive` is the default. It first runs 75 no-crop candidates per
+  image, then expands to a capped fallback set only when the early result is low
+  confidence. The default fallback cap is 455 candidates; use
+  `--adaptive-full-limit` to tune the speed/accuracy tradeoff.
+- `--profile fast` always uses the 75-candidate set.
+- `--profile full` always uses the full generated candidate set.
 
 Each image prints `mode`, candidate count, OCR row count, top candidate, and
 preprocessing/OCR/total seconds. `adaptive-fast` means the early result was
-accepted; `adaptive-full` means the image expanded to the full candidate set.
+accepted; `adaptive-balanced` means the image expanded to the capped fallback
+candidate set.
 
 ## Outputs
 

@@ -36,6 +36,7 @@ ENGINE_DISAGREE_OVERRIDES = {
 NEAR_TIE_CROP_OVERRIDES = {
     ("九", "力"),
 }
+CHAR_CROP_SCORE_WEIGHT = 3.6
 
 
 @dataclass
@@ -298,7 +299,7 @@ def score_combinations(input_rows: list[dict[str, str]], expected_len: int) -> l
             for idx, char in enumerate(chars):
                 support = char_crop_support[idx]
                 if support:
-                    char_crop_score += math.log1p(support.get(char, 0.0)) * 4.2
+                    char_crop_score += math.log1p(support.get(char, 0.0)) * CHAR_CROP_SCORE_WEIGHT
                 winner = char_winner_bonus.get(idx)
                 if winner and winner[0] == char:
                     char_crop_score += winner[1]

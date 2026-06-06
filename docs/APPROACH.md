@@ -17,8 +17,10 @@ interference.
    - adaptive dominant-color extraction
    - small right/bottom crops
 4. Run ddddocr default, beta, and old recognizers. The default adaptive profile
-   starts with 50 no-crop variants and only expands to the full 650-variant set
-   when the early OCR consensus is low confidence.
+   starts with 75 no-crop variants and only expands to a capped fallback set
+   when the early OCR consensus is low confidence. The default cap is 455
+   candidates so ambiguous images get more evidence without paying full-profile
+   cost.
 5. Normalize OCR text to Chinese characters.
 6. Rerank by:
    - expected length
