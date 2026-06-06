@@ -27,6 +27,7 @@ dependencies = [
   "opencv-python==4.13.0.92",
   "pillow==12.2.0",
   "numpy==2.4.6",
+  "PySide6==6.11.1",
 ]
 
 [build-system]

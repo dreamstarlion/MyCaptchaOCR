@@ -17,6 +17,7 @@ def main() -> None:
     import numpy
     import onnxruntime
     import PIL
+    import PySide6
 
     print(f"python={sys.version.split()[0]}")
     print(f"ddddocr={version('ddddocr')}")
@@ -24,6 +25,7 @@ def main() -> None:
     print(f"opencv={cv2.__version__}")
     print(f"numpy={numpy.__version__}")
     print(f"pillow={PIL.__version__}")
+    print(f"pyside6={PySide6.__version__}")
     for name, path in paths.items():
         print(f"{name}={path}")
 

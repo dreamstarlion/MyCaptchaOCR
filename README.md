@@ -32,6 +32,7 @@ text boxes, while recognition-only mode produced unstable Chinese predictions.
   - `opencv-python==4.13.0.92`
   - `pillow==12.2.0`
   - `numpy==2.4.6`
+  - `PySide6==6.11.1`
 
 `opencv-contrib-python` and `pandas` are not required.
 
@@ -51,8 +52,17 @@ Check the runtime:
 .venv/bin/python scripts/check_ocr_env.py
 ```
 
-The check prints Python, ddddocr, ONNX Runtime, OpenCV, NumPy, Pillow, and the
-project-local OCR cache paths.
+On Windows PowerShell, use a Windows virtual environment:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe scripts\check_ocr_env.py
+```
+
+The check prints Python, ddddocr, ONNX Runtime, OpenCV, NumPy, Pillow, PySide6,
+and the project-local OCR cache paths.
 
 ## Usage
 
@@ -62,6 +72,26 @@ Run the default Chinese sample set:
 .venv/bin/python scripts/adaptive_ocr_pipeline.py
 .venv/bin/python scripts/adaptive_ocr_rerank.py --top-n 12
 ```
+
+Run the mini desktop UI:
+
+```bash
+.venv/bin/python scripts/ocr_desktop_app.py
+```
+
+On Windows:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\ocr_desktop_app.py
+```
+
+Click `选取区域`, drag over the screen region to recognize, then click `识别`.
+The UI keeps OCR engines warm after the first recognition so later runs avoid
+model reload time. On macOS, grant Screen Recording permission if the selection
+capture is blank or blocked.
+
+See [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md) for platform notes and packaging
+commands.
 
 The default input pattern is `sample-[0-9]*.png`, which covers the five bundled
 Chinese captcha samples in `data/raw/`. To process every raw PNG, including the
