@@ -23,19 +23,6 @@ from ocr_project_env import PROJECT_ROOT
 
 
 REPORTS_DIR = PROJECT_ROOT / "reports"
-CONFUSABLE_CROP_OVERRIDES = {
-    ("授", "受"),
-    ("国", "田"),
-    ("里", "甲"),
-    ("鉴", "紧"),
-    ("尖", "少"),
-}
-ENGINE_DISAGREE_OVERRIDES = {
-    ("言", "旨"),
-}
-NEAR_TIE_CROP_OVERRIDES = {
-    ("九", "力"),
-}
 CHAR_CROP_SCORE_WEIGHT = 3.6
 
 
@@ -126,7 +113,6 @@ def score_combinations(input_rows: list[dict[str, str]], expected_len: int) -> l
         pos_support = [defaultdict(lambda: {"weight": 0.0, "engines": set(), "families": set(), "variants": set()}) for _ in range(expected_len)]
         char_crop_support = [defaultdict(float) for _ in range(expected_len)]
         exact_char_support = [defaultdict(float) for _ in range(expected_len)]
-        engine_char_counts = [defaultdict(lambda: defaultdict(float)) for _ in range(expected_len)]
         prefix_support: dict[tuple[int, str], float] = defaultdict(float)
         suffix_support: dict[tuple[int, str], float] = defaultdict(float)
         direct_rows: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -156,7 +142,6 @@ def score_combinations(input_rows: list[dict[str, str]], expected_len: int) -> l
                 for idx, char in enumerate(text):
                     add_position_support(row, idx, char, weight)
                     exact_char_support[idx][char] += weight
-                    engine_char_counts[idx][row.get("engine", "")][char] += 1.0
             elif 1 < len(text) < expected_len:
                 for idx, char in enumerate(text):
                     add_position_support(row, idx, char, weight * 0.62)
@@ -198,9 +183,6 @@ def score_combinations(input_rows: list[dict[str, str]], expected_len: int) -> l
             option_labels.append("/".join(f"{char}:{score:.1f}" for char, score in keep))
 
         char_winner_bonus: dict[int, tuple[str, float]] = {}
-        exact_narrow_bonus: dict[int, tuple[str, float]] = {}
-        engine_disagree_bonus: dict[int, tuple[str, float]] = {}
-        near_tie_bonus: dict[int, tuple[str, float]] = {}
         for idx, support in enumerate(char_crop_support):
             if len(support) < 2 or not exact_char_support[idx]:
                 continue
@@ -209,50 +191,14 @@ def score_combinations(input_rows: list[dict[str, str]], expected_len: int) -> l
             crop_char, crop_weight = crop_ranked[0]
             second_weight = crop_ranked[1][1]
             exact_char = exact_ranked[0][0]
-            ratio_threshold = 1.25 if (crop_char, exact_char) in CONFUSABLE_CROP_OVERRIDES else 2.0
             if (
                 crop_char != exact_char
                 and exact_char_support[idx].get(crop_char, 0.0) > 0
                 and support.get(exact_char, 0.0) > 0
                 and crop_weight >= 20.0
-                and crop_weight >= second_weight * ratio_threshold
+                and crop_weight >= second_weight * 2.0
             ):
                 char_winner_bonus[idx] = (crop_char, math.log1p(crop_weight) * 12.0)
-            exact_crop_weight = support.get(exact_char, 0.0)
-            for alt_char, alt_weight in crop_ranked[1:4]:
-                if (
-                    (alt_char, exact_char) in NEAR_TIE_CROP_OVERRIDES
-                    and exact_char_support[idx].get(alt_char, 0.0) > 0
-                    and exact_crop_weight > 0
-                    and alt_weight >= exact_crop_weight * 0.72
-                ):
-                    near_tie_bonus[idx] = (alt_char, math.log1p(alt_weight) * 15.0)
-                    break
-        for idx, exact_support in enumerate(exact_char_support):
-            ranked = sorted(exact_support.items(), key=lambda item: item[1], reverse=True)
-            if len(ranked) < 2:
-                continue
-            exact_char, exact_weight = ranked[0]
-            _second_char, second_weight = ranked[1]
-            if exact_char == "斤" and exact_weight >= 80.0 and exact_weight >= second_weight * 1.8:
-                exact_narrow_bonus[idx] = (exact_char, math.log1p(exact_weight) * 8.0)
-        for idx, by_engine in enumerate(engine_char_counts):
-            default_counts = by_engine.get("ddddocr_default", {})
-            old_counts = by_engine.get("ddddocr_old", {})
-            beta_counts = by_engine.get("ddddocr_beta", {})
-            if not default_counts or not old_counts or not beta_counts:
-                continue
-            default_char, default_count = max(default_counts.items(), key=lambda item: item[1])
-            old_char, old_count = max(old_counts.items(), key=lambda item: item[1])
-            beta_char, beta_count = max(beta_counts.items(), key=lambda item: item[1])
-            paired_count = default_count + old_count
-            if (
-                default_char == old_char
-                and (default_char, beta_char) in ENGINE_DISAGREE_OVERRIDES
-                and paired_count >= 40.0
-                and paired_count >= beta_count * 0.65
-            ):
-                engine_disagree_bonus[idx] = (default_char, math.log1p(paired_count) * 14.0)
 
         for chars in itertools.product(*[[char for char, _score in opts] for opts in position_options]):
             text = "".join(chars)
@@ -303,15 +249,6 @@ def score_combinations(input_rows: list[dict[str, str]], expected_len: int) -> l
                 winner = char_winner_bonus.get(idx)
                 if winner and winner[0] == char:
                     char_crop_score += winner[1]
-                exact_narrow = exact_narrow_bonus.get(idx)
-                if exact_narrow and exact_narrow[0] == char:
-                    char_crop_score += exact_narrow[1]
-                engine_disagree = engine_disagree_bonus.get(idx)
-                if engine_disagree and engine_disagree[0] == char:
-                    char_crop_score += engine_disagree[1]
-                near_tie = near_tie_bonus.get(idx)
-                if near_tie and near_tie[0] == char:
-                    char_crop_score += near_tie[1]
             score = positional + direct_score + ngram_score + char_crop_score - (0.0 if direct else 1.5)
             results.append(
                 ComboScore(

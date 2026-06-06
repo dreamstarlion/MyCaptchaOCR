@@ -32,18 +32,6 @@ configure_ocr_environment()
 RAW_DIR = PROJECT_ROOT / "data" / "raw"
 OUT_DIR = PROJECT_ROOT / "data" / "processed" / "adaptive_ocr"
 REPORTS_DIR = PROJECT_ROOT / "reports"
-RISKY_CONFUSABLE_PAIRS = {
-    frozenset(pair)
-    for pair in [
-        ("授", "受"),
-        ("国", "田"),
-        ("言", "旨"),
-        ("九", "力"),
-        ("三", "参"),
-        ("三", "多"),
-        ("多", "参"),
-    ]
-}
 FAMILY_PRIORITY = {
     "roi": 0,
     "clahe_sharp": 1,
@@ -128,7 +116,7 @@ def encode_png(bgr: np.ndarray) -> bytes:
 
 
 def normalize_text(text: str) -> str:
-    text = (text or "").translate(str.maketrans({"叁": "三", "參": "参"}))
+    text = text or ""
     return "".join(re.findall(r"[\u4e00-\u9fff]", text))
 
 
@@ -598,36 +586,11 @@ def score_texts(rows: list[OCRRow], expected_len: int) -> list[TextScore]:
     return sorted(scores, key=lambda item: (item.image_key, -item.score, item.text))
 
 
-def differs_by_risky_confusable(left: str, right: str) -> bool:
-    if len(left) != len(right):
-        return False
-    diffs = [(a, b) for a, b in zip(left, right) if a != b]
-    return len(diffs) == 1 and frozenset(diffs[0]) in RISKY_CONFUSABLE_PAIRS
-
-
-def has_confusable_conflict(scores: list[TextScore], expected_len: int, max_gap: float = 28.0) -> bool:
-    if not scores:
-        return False
-    top = scores[0]
-    if len(top.text) != expected_len:
-        return True
-    for score in scores[1:20]:
-        if len(score.text) != expected_len:
-            continue
-        if top.score - score.score > max_gap:
-            break
-        if differs_by_risky_confusable(top.text, score.text):
-            return True
-    return False
-
-
 def is_confident(scores: list[TextScore], expected_len: int, min_margin: float, min_engines: int, min_families: int) -> bool:
     if not scores:
         return False
     top = scores[0]
     if len(top.text) != expected_len:
-        return False
-    if has_confusable_conflict(scores, expected_len):
         return False
     second_score = scores[1].score if len(scores) > 1 else float("-inf")
     margin = top.score - second_score
