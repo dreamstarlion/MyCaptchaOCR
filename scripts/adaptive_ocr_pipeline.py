@@ -15,15 +15,23 @@ import math
 import re
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import ddddocr
 import numpy as np
+import onnxruntime
 from PIL import Image, ImageDraw, ImageFont
 
-from ocr_project_env import PROJECT_ROOT, configure_ocr_environment
+from ocr_project_env import (
+    OCR_FORCE_BALANCED,
+    OCR_INTRA_OP_THREADS,
+    OCR_WORKERS,
+    PROJECT_ROOT,
+    configure_ocr_environment,
+)
 
 
 configure_ocr_environment()
@@ -510,30 +518,62 @@ def image_adjusted_limit(path: Path, limit: int | None) -> int | None:
 
 
 def create_ocr_engines() -> dict[str, ddddocr.DdddOcr]:
-    return {
-        "ddddocr_default": ddddocr.DdddOcr(show_ad=False),
-        "ddddocr_beta": ddddocr.DdddOcr(show_ad=False, beta=True),
-        "ddddocr_old": ddddocr.DdddOcr(show_ad=False, old=True),
-    }
+    # ddddocr 不暴露 SessionOptions，临时包一层 onnxruntime.InferenceSession 注入线程上限。
+    # 每个 session 单线程（OCR_INTRA_OP_THREADS=1）+ run_ocr_with_engines 多候选并发，
+    # 喂满物理核又避免小模型“过度并行”反而变慢。
+    original_session = onnxruntime.InferenceSession
+
+    def capped_session(*args, **kwargs):
+        if "sess_options" not in kwargs:
+            options = onnxruntime.SessionOptions()
+            options.intra_op_num_threads = OCR_INTRA_OP_THREADS
+            options.inter_op_num_threads = 1
+            kwargs["sess_options"] = options
+        return original_session(*args, **kwargs)
+
+    onnxruntime.InferenceSession = capped_session
+    try:
+        return {
+            "ddddocr_default": ddddocr.DdddOcr(show_ad=False),
+            "ddddocr_beta": ddddocr.DdddOcr(show_ad=False, beta=True),
+            "ddddocr_old": ddddocr.DdddOcr(show_ad=False, old=True),
+        }
+    finally:
+        onnxruntime.InferenceSession = original_session
+
+
+def _classify_candidate(candidate: Candidate, engines: dict[str, ddddocr.DdddOcr]) -> list[OCRRow]:
+    data = candidate.path.read_bytes()
+    rows = []
+    for engine_name, engine in engines.items():
+        raw_text = str(engine.classification(data) or "")
+        rows.append(
+            OCRRow(
+                image_key=candidate.image_key,
+                variant=candidate.variant,
+                family=candidate.family,
+                engine=engine_name,
+                raw_text=raw_text,
+                text=normalize_text(raw_text),
+                path=candidate.path.relative_to(PROJECT_ROOT).as_posix(),
+            )
+        )
+    return rows
 
 
 def run_ocr_with_engines(candidates: list[Candidate], engines: dict[str, ddddocr.DdddOcr]) -> list[OCRRow]:
+    # 各候选图相互独立、最终按汇总打分（与顺序无关），故并发推理不改变结果。
+    # ddddocr 不传 charset_range 时 classification 不改引擎状态、onnxruntime.run 线程安全，可共享引擎并发调用。
+    if OCR_WORKERS <= 1 or len(candidates) <= 1:
+        rows: list[OCRRow] = []
+        for candidate in candidates:
+            rows.extend(_classify_candidate(candidate, engines))
+        return rows
+
     rows = []
-    for candidate in candidates:
-        data = candidate.path.read_bytes()
-        for engine_name, engine in engines.items():
-            raw_text = str(engine.classification(data) or "")
-            rows.append(
-                OCRRow(
-                    image_key=candidate.image_key,
-                    variant=candidate.variant,
-                    family=candidate.family,
-                    engine=engine_name,
-                    raw_text=raw_text,
-                    text=normalize_text(raw_text),
-                    path=candidate.path.relative_to(PROJECT_ROOT).as_posix(),
-                )
-            )
+    with ThreadPoolExecutor(max_workers=OCR_WORKERS, thread_name_prefix="ocr-infer") as pool:
+        for candidate_rows in pool.map(lambda candidate: _classify_candidate(candidate, engines), candidates):
+            rows.extend(candidate_rows)
     return rows
 
 
@@ -642,7 +682,10 @@ def run_image(
     ocr_s += time.perf_counter() - ocr_start
     fast_scores = score_texts(fast_rows, expected_len)
 
-    if profile == "fast" or is_confident(fast_scores, expected_len, confidence_margin, confidence_min_engines, confidence_min_families):
+    if profile == "fast" or (
+        not OCR_FORCE_BALANCED
+        and is_confident(fast_scores, expected_len, confidence_margin, confidence_min_engines, confidence_min_families)
+    ):
         top = fast_scores[0] if fast_scores else None
         mode = "fast" if profile == "fast" else "adaptive-fast"
         return ImageRun(fast_candidates, fast_rows, mode, top.text if top else "", top.score if top else None, preprocess_s, ocr_s, time.perf_counter() - start)

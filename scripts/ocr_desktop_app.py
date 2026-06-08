@@ -68,7 +68,7 @@ def capture_screen_region(rect: QRect) -> QPixmap:
 
 
 class SelectionOverlay(QWidget):
-    selected = Signal(object, QSize)
+    selected = Signal(object, QSize, object)
     canceled = Signal()
     failed = Signal(str)
 
@@ -163,7 +163,7 @@ class SelectionOverlay(QWidget):
             self.close()
             return
 
-        self.selected.emit(CAPTURE_PATH, pixmap.size())
+        self.selected.emit(CAPTURE_PATH, pixmap.size(), rect)
         self.close()
 
     def _cancel(self) -> None:
@@ -184,6 +184,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(360, 236)
         self.setMaximumWidth(420)
         self._capture_path: Path | None = None
+        self._region_rect: QRect | None = None  # 记住的选区，识别时自动重截
         self._overlay: SelectionOverlay | None = None
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="captcha-ocr")
         self._worker_signals = WorkerSignals()
@@ -265,12 +266,13 @@ class MainWindow(QMainWindow):
         self._overlay.raise_()
         self._overlay.activateWindow()
 
-    def _on_region_selected(self, path: Path, image_size: QSize) -> None:
+    def _on_region_selected(self, path: Path, image_size: QSize, rect: QRect) -> None:
         self.show()
         self.raise_()
         self.activateWindow()
         self._capture_path = path
-        self.status_label.setText(f"已选取 {image_size.width()} x {image_size.height()}")
+        self._region_rect = QRect(rect)  # 记住选区，之后每次识别自动重截这块
+        self.status_label.setText(f"已选取 {image_size.width()} x {image_size.height()}（点“识别”将自动重截此区域）")
         self.result_box.clear()
         self.recognize_button.setEnabled(True)
         self.select_button.setEnabled(True)
@@ -303,7 +305,7 @@ class MainWindow(QMainWindow):
         )
 
     def _recognize(self) -> None:
-        if self._capture_path is None:
+        if self._region_rect is None and self._capture_path is None:
             self.status_label.setText("请先选取区域")
             return
         self.status_label.setText("识别中，请等待...")
@@ -311,7 +313,34 @@ class MainWindow(QMainWindow):
         self.select_button.setEnabled(False)
         self.recognize_button.setEnabled(False)
 
-        future = self._executor.submit(recognize_with_shared_service, self._capture_path)
+        if self._region_rect is not None:
+            # 每次识别都重新截取记忆的选区（拿到刷新后的验证码）。
+            # 若本窗口挡住了该区域，先临时隐藏再截，避免把窗口自己截进去。
+            if self.frameGeometry().intersects(self._region_rect):
+                self.hide()
+                QTimer.singleShot(150, self._recapture_and_run)
+            else:
+                self._recapture_and_run()
+        else:
+            self._run_ocr(self._capture_path)
+
+    def _recapture_and_run(self) -> None:
+        pixmap = capture_screen_region(self._region_rect)
+        if not self.isVisible():
+            self.show()
+            self.raise_()
+            self.activateWindow()
+        if pixmap.isNull() or not pixmap.save(str(CAPTURE_PATH), "PNG"):
+            self.status_label.setText("截图失败")
+            self.select_button.setEnabled(True)
+            self.recognize_button.setEnabled(True)
+            return
+        self._capture_path = CAPTURE_PATH
+        self._update_preview(CAPTURE_PATH)
+        self._run_ocr(CAPTURE_PATH)
+
+    def _run_ocr(self, image_path: Path) -> None:
+        future = self._executor.submit(recognize_with_shared_service, image_path)
         future.add_done_callback(self._emit_worker_result)
 
     def _emit_worker_result(self, future: Future) -> None:
