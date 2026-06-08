@@ -20,7 +20,10 @@ interference.
    starts with 75 no-crop variants and only expands to a capped fallback set
    when the early OCR consensus is low confidence. The default cap is 455
    candidates so ambiguous images get more evidence without paying full-profile
-   cost.
+   cost. The desktop app ships with `OCR_FORCE_BALANCED = True`, which skips the
+   early exit and always runs the 455-candidate balanced path; candidate
+   inference is parallelized across CPU cores, so a balanced run is about 9s on a
+   6-core CPU instead of about 37s when run serially.
 5. Normalize OCR text to Chinese characters.
 6. Rerank by:
    - expected length

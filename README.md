@@ -17,8 +17,9 @@ text boxes, while recognition-only mode produced unstable Chinese predictions.
 - Builds conservative, color-priority, line-inpaint, dark-line-suppression, and
   crop variants.
 - Runs ddddocr default, beta, and old recognizers.
-- Uses an adaptive default profile: stable images run a small candidate set,
-  while low-confidence images fall back to the full candidate set.
+- Uses an adaptive profile (low-confidence images expand to the full candidate
+  set); the shipped default runs that balanced set on every image for stable
+  accuracy.
 - Reranks candidates while reducing false consensus from near-duplicate
   preprocessing variants.
 - Writes reproducible CSV, Markdown, and visual sheet outputs.
@@ -79,16 +80,18 @@ Run the mini desktop UI:
 .venv/bin/python scripts/ocr_desktop_app.py
 ```
 
-On Windows:
+On Windows, double-click `启动.bat` in the project root, or run:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\ocr_desktop_app.py
 ```
 
-Click `选取区域`, drag over the screen region to recognize, then click `识别`.
-The UI keeps OCR engines warm after the first recognition so later runs avoid
-model reload time. On macOS, grant Screen Recording permission if the selection
-capture is blank or blocked.
+Click `选取区域` and drag over the target region once. The region is remembered,
+so each later `识别` click re-captures that same region (picking up a refreshed
+captcha in the same spot) without re-selecting; click `选取区域` again only to
+change the region. The UI keeps OCR engines warm after the first recognition so
+later runs avoid model reload time. On macOS, grant Screen Recording permission
+if the selection capture is blank or blocked.
 
 See [docs/DESKTOP_UI.md](docs/DESKTOP_UI.md) for platform notes and packaging
 commands.
@@ -118,10 +121,29 @@ Use a different input directory:
 - `--profile fast` always uses the 75-candidate set.
 - `--profile full` always uses the full generated candidate set.
 
+The desktop app and the shipped default set `OCR_FORCE_BALANCED = True` in
+`scripts/ocr_project_env.py`, which makes the adaptive profile skip the fast
+early-exit and always run the 455-candidate balanced path. Set it to `False` to
+restore confidence-based early exit (and the faster `adaptive-fast` mode on easy
+images).
+
 Each image prints `mode`, candidate count, OCR row count, top candidate, and
 preprocessing/OCR/total seconds. `adaptive-fast` means the early result was
 accepted; `adaptive-balanced` means the image expanded to the capped fallback
 candidate set.
+
+### Performance
+
+OCR inference over the candidate variants is parallelized across CPU cores, so a
+455-candidate balanced run takes about 9s on a 6-core CPU instead of about 37s
+when run serially, with byte-identical results. Tuning knobs live at the top of
+`scripts/ocr_project_env.py`:
+
+- `OCR_WORKERS` — concurrent inference workers (default 6; set to your physical
+  core count).
+- `OCR_INTRA_OP_THREADS` and `OCR_CV_THREADS` — per-session ONNX Runtime threads
+  and OpenCV threads, capped so recognition does not saturate every core.
+- `OCR_FORCE_BALANCED` — always run the balanced path (default `True`).
 
 ## Outputs
 
@@ -144,12 +166,12 @@ See [docs/RESULTS.md](docs/RESULTS.md) for current sample outputs. The most
 ambiguous sample is `sample-034918.png`; the reranker keeps `狱己擦九` and
 `狱己擦力` close because the final character has nearly tied evidence.
 
-Recent local timing on Python 3.14.5 with the default adaptive profile:
+Recent local timing on an Intel i5-10400 (6 cores / 12 threads), Python 3.14.5,
+default adaptive profile with always-balanced and parallel inference:
 
-| sample set | average total time | notes |
+| sample set | per-image time | notes |
 | --- | ---: | --- |
-| 5 Chinese samples | 5.64s/image | stable samples complete in about 1.5-1.8s |
-| full profile baseline | 18.58s/image | every image runs all 650 candidates |
+| 5 Chinese samples | ~9-14s/image | every image runs the 455-candidate balanced path; time scales with image size |
 
 ## Project Layout
 
